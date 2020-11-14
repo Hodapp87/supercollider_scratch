@@ -106,11 +106,11 @@ f.value(5)
 
 (
 SynthDef.new(\windThing, {
-	arg out_bus, amp=0.20, delay_base=0.02, lfreq=0.1;
+	arg out_bus, amp=0.20, delay_base=0.02, lfreq=0.1, qf=2.0;
 	var sig, delays, amp2, lpf, qf;
 	amp2 = LFNoise2.kr(lfreq).range(0.2, 0.8);
 	lpf = LFNoise2.kr(lfreq).exprange(50, 1000);
-	qf = LFNoise2.kr(lfreq).range(0.0, 3.0);
+	//qf = LFNoise2.kr(lfreq).range(0.0, 3.0);
 	sig = PinkNoise.ar(amp * amp2) ! 2;
 	//sig = LPF.ar(sig, lpf);
 	sig = BPF.ar(sig, lpf, qf);
@@ -130,53 +130,59 @@ s.scope;
 s.meter;
 
 (
-SynthDef.new(\trainThing, {
-	arg out_bus, freq = 1200, qf = 0.0005, gate = 0, delay = 0.0, env_delay = 0.0, amp = 1.0;
-	var attack = Rand.new(1.0, 2.5);
-	var sustain = Rand.new(1.0, 4.0);
-	var level = Rand.new(0.1, 1.0);
-	var env = Env.linen(attack, sustain, attack, level, -3.0);
-	var sig = WhiteNoise.ar();
-	var f2 = freq * LFNoise2.kr(5.0).range(0.95, 1.05);
-	sig = Resonz.ar(sig, f2, qf) * 10;
-	// TODO: Is there a better way to get that 'ringing' sort of sound?
-	sig = DelayN.ar(sig, delaytime: [0.max(delay), 0.max(delay.neg)]);
-	sig = FreeVerb.ar(sig, 0.95, 1.0, 0.25) * env.delay(env_delay).kr(doneAction: 2, gate: 1);
-	// TODO: Why must I use the envelope on FreeVerb to avoid
-	// the clicks at the end?
-	Out.ar(out_bus, sig * amp);
+Window.closeAll;
+w = Window.new("Foo", Rect(200,200,255,100)).front;
+w.view.decorator = FlowLayout(w.view.bounds);
+s = Slider(w, 150@20);
+s.action = { x.set(\amp, s.value) };
+f = Slider(w, 150@20);
+f.action = { x.set(\lfreq, f.value * 10) };
+d = Slider(w, 150@20);
+d.action = { x.set(\delay_base, (f.value - 0.5) / 2.5) };
+q = Slider(w, 150@20);
+q.action = { x.set(\qf, q.value) };
+w.front;
+)
+
+(
+SynthDef.new(\sine, {
+	arg freq=440, atk=0.005, rel=0.3, amp=1, pan=0;
+	var sig, env;
+	sig = LFTri.ar(freq);
+	env = EnvGen.kr(Env.new([0,1,0], [atk,rel], [1,-1]), doneAction: 2);
+	sig = Pan2.ar(sig, pan, amp);
+	sig = sig*env;
+	Out.ar(0, sig);
 }).add;
 )
-x = Synth.new(\trainThing, [\out_bus, 0, \freq, exprand(1000, 8000), \delay, rand(-0.1, 0.1), \gate, 1]);
-x.set(\gate, 0);
-x.free;
-
-// Some dabbling with a Routine, but it forces sequential (ish):
-(
-x = Routine({
-	loop({
-		Synth.new(\trainThing, [\out_bus, 0, \freq, exprand(1000, 8000), \delay, rand(-0.1, 0.1), \gate, 1]);
-		5.wait;
-	})
-}).play
-)
-// how do I stop this?
 
 (
-var pb = Pbind(
-	\instrument, \trainThing,
-	\out_bus, 0,
-	\dur, Pfunc({rrand(0.25, 4.0)}),
-	\env_delay, Pfunc({rrand(0.0, 5.0)}),
-	\delay, rand(-0.1, 0.1),
-	\freq, Pfunc({exprand(1000, 8000)}),
-	\amp, Pfunc({rrand(0.0, 0.5)}),
-);
-var player = pb.play;
 //s.record(duration: 60);
+Pdef(
+	\sinepat,
+	Pbind(
+		\instrument, \sine,
+		\dur, Pwhite(0.1, 0.2, inf).round(0.05),
+		// \state is used by nothing directly, but I guess I
+		// can still refer to it via Pkey
+		\state, Pseq([0, 12], inf).trace(prefix: "s "),
+		\midinote,
+		Pxrand(
+		    [Pseq([44, 45, 47, 48, 50, 51, 53, 54]),
+			 //Pseq([45, 50]),
+			 //Pseq([44, 49]),
+			],
+			inf,
+		) + Pkey(\state),
+		//\harmonic, Pexprand(1, 20, inf).round.trace,
+		//\harmonic, Pxrand([1,2,4,8,16,32], inf).trace(prefix: "harmonic "),
+		\harmonic, Pxrand([1, 2, 3, 4], inf).trace(prefix: "h "),
+		\atk, Pwhite(0.01, 0.10, inf),
+		\rel, Pwhite(0.5, 1.0, inf),
+		\amp, Pkey(\harmonic).reciprocal * 0.3,
+		\pan, Pwhite(-0.8, 0.8, inf),
+	);
+).play;
 )
-// TODO: Why does this fail to work right if I re-enable
-// the gate in the args?
-// TODO: How do I stop this?
 
-//thisProcess.platform.recordingsDir
+Pdef(\sinepat).stop
